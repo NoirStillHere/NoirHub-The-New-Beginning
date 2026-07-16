@@ -86,18 +86,8 @@ local BLOCKED_PROPS = {
 
 local firingProps = setmetatable({}, { __mode = "k" })
 
-local ESP_SOURCE_URLS = {
-	"https://api.rubis.app/v2/scrap/qghKmrRhRUfwDnee/raw",
-}
-
 local MANAGER_SOURCE_URLS = {
 	"https://api.rubis.app/v2/scrap/rNPKyva99IGbf6tH/raw"
-}
-
-local GAME_SCRIPT_URLS = {
-	[1054526971] = {
-		"https://raw.githubusercontent.com/AAPVdev/scripts/refs/heads/main/games/brm5.lua",
-	},
 }
 
 local function fetchWithFallback(urlList)
@@ -111,16 +101,6 @@ local function fetchWithFallback(urlList)
 		end
 	end
 	return nil
-end
-
-local function ensureESPLoaded()
-	if limbData.ESP then return limbData.ESP end
-	if not (has_loadstring and has_httpget) then return nil end
-	local source = fetchWithFallback(ESP_SOURCE_URLS)
-	if not source then return nil end
-	local ok, res = pcall(function() return loadstring(source)() end)
-	if ok then limbData.ESP = res end
-	return limbData.ESP
 end
 
 local function ensureMANAGERLoaded()
@@ -166,17 +146,6 @@ local RESTART_KEYS = {
 	ALT_RESET_LIMB_ON_DEATH = true,
 	NPC_DIRECTORIES         = true,
 }
-
-local function applyToggles(s, flags)
-	return {
-		Box      = s.ESP_BOX      and flags.Box,
-		Box3D    = s.ESP_BOX3D    and flags.Box3D,
-		Tracer   = s.ESP_TRACER   and flags.Tracer,
-		Skeleton = s.ESP_SKELETON and flags.Skeleton,
-		Health   = s.ESP_HEALTH   and flags.Health,
-		Label    = s.ESP_LABEL    and flags.Label,
-	}
-end
 
 local function buildLimbProps(limb, entry, settings)
 	local newVec = Vector3_new(settings.LIMB_SIZE, settings.LIMB_SIZE, settings.LIMB_SIZE)
@@ -397,33 +366,6 @@ local DEFAULTS = {
 	NPC_DIRECTORIES         = {},
 	CUSTOM_CHARACTER_SYSTEM   = false,
 	GET_PLAYER_FROM_CHARACTER = nil,
-	ESP                     = false,
-	ESP_COLOR               = Color3.fromRGB(255, 50, 50),
-	ESP_BOX3D_COLOR         = Color3.fromRGB(255, 50, 50),
-	ESP_HEALTH_COLOR        = Color3.fromRGB(9, 255, 0),
-	ESP_EMPTY_COLOR         = Color3.fromRGB(255, 0, 0),
-	ESP_SKELETON_COLOR      = Color3.fromRGB(255, 157, 0),
-	ESP_TEXT_COLOR          = Color3.fromRGB(255, 255, 255),
-	ESP_TEXT_SIZE           = 16,
-	ESP_OFFSCREEN_POINT     = true,
-	ESP_FILTER_LOCAL        = true,
-	ESP_MAX_DISTANCE        = 500,
-	ESP_NEAR_DISTANCE       = 100,
-	ESP_MEDIUM_DISTANCE     = 250,
-	ESP_OCCLUSION           = false,
-	ESP_OCCLUSION_FREQUENCY = 4,
-	ESP_BOX      = true,
-	ESP_BOX3D    = false,
-	ESP_TRACER   = true,
-	ESP_SKELETON = true,
-	ESP_HEALTH   = true,
-	ESP_LABEL    = true,
-	ESP_NEAR_FLAGS   = { Box = true,  Tracer = true, Skeleton = true,  Health = true,  Label = true,  Box3D = false },
-	ESP_MEDIUM_FLAGS = { Box = true,  Tracer = true, Skeleton = false, Health = true,  Label = true,  Box3D = false },
-	ESP_FAR_FLAGS    = { Box = true,  Tracer = true, Skeleton = false, Health = false, Label = false, Box3D = false },
-	ESP_TEXT_RESOLVER = nil,
-	ESP_CAN_DRAW      = nil,
-	ESP_TRACER_ORIGIN = nil,
 }
 
 local function mergeSettings(user)
@@ -556,57 +498,18 @@ function LimbExtender:_applyLimbs(player, char, limb)
 		cacheKey = self._npcIdMap[char]
 	end
 	sharedApplyLimb(self, cacheKey, char, limb)
-	if self._settings.ESP and self._ESP then
-		local tracked = self._ESP:Track(char)
-		if not tracked then
-			task_spawn(function()
-				local attempts = 0
-				while not self._ESP:Track(char) and attempts < 30 do
-					task_wait(0.1)
-					attempts = attempts + 1
-				end
-			end)
-		end
-	end
 end
 
 function LimbExtender:_removeLimbs(player, char, limb)
 	if self._suppressOnLimbLost then return end
 	local cacheKey = player and player.Name or self._npcIdMap[char]
 	sharedRestoreLimb(self, cacheKey, limb)
-	if self._ESP and char then self._ESP:Untrack(char) end
 	if not player then self._npcIdMap[char] = nil end
 end
 
 function LimbExtender:_processDirtyWork()
 	self._workScheduled = false
 	if not self._running then return end
-
-	local s = self._settings
-
-	if self._dirtyESP then
-		self._dirtyESP = false
-		if s.ESP then
-			local espModule = ensureESPLoaded()
-			if espModule then
-				if not self._ESP then
-					self._ESP = espModule.new(self:_buildESPConfig())
-					if self._running then
-						self._ESP:Start()
-						for _, entry in pairs(self._playerCache) do
-							if entry.Character then self._ESP:Track(entry.Character) end
-						end
-					end
-				else
-					self._ESP:SetOptions(self:_buildESPConfig())
-				end
-			else
-				s.ESP = false
-			end
-		else
-			if self._ESP then self._ESP:Destroy(); self._ESP = nil end
-		end
-	end
 
 	while self._dirtyRestart or self._dirtyCosmetic do
 		if self._dirtyRestart and not self._restartLock then
@@ -615,13 +518,13 @@ function LimbExtender:_processDirtyWork()
 			self._dirtyCosmetic = false
 
 			for key in pairs(RESTART_KEYS) do
-				if s[key] ~= nil then
+				if self._settings[key] ~= nil then
 					if key == "ALT_RESET_LIMB_ON_DEATH" then
-						self._manager:Set("DEATH_RESTORE", s[key])
+						self._manager:Set("DEATH_RESTORE", self._settings[key])
 					elseif key == "NPC_DIRECTORIES" then
-						self._manager._settings.NPC_DIRECTORIES = s[key]
+						self._manager._settings.NPC_DIRECTORIES = self._settings[key]
 					else
-						self._manager._settings[key] = s[key]
+						self._manager._settings[key] = self._settings[key]
 					end
 				end
 			end
@@ -639,7 +542,7 @@ function LimbExtender:_processDirtyWork()
 		end
 	end
 
-	if self._dirtyRestart or self._dirtyCosmetic or self._dirtyESP then
+	if self._dirtyRestart or self._dirtyCosmetic then
 		self._workScheduled = true
 		task_spawn(function() self:_processDirtyWork() end)
 	end
@@ -662,14 +565,8 @@ function LimbExtender:_doRestartBatched()
 			local entry = cache[keys[j]]
 			if entry and entry.Limb then
 				sharedRestoreLimb(self, keys[j], entry.Limb)
-				if self._ESP and entry.Character then
-					self._ESP:Untrack(entry.Character)
-				end
 			elseif entry and entry.Character then
 				limbData.instanceLookup[entry.Character] = nil
-				if self._ESP then
-					self._ESP:Untrack(entry.Character)
-				end
 				cache[keys[j]] = nil
 			end
 		end
@@ -679,14 +576,11 @@ function LimbExtender:_doRestartBatched()
 	self._suppressOnLimbLost = false
 	table_clear(cache)
 
-	if self._ESP then self._ESP:Stop() end
 	if not self._running then return end
 
 	self._generation = self._generation + 1
 	self._managerGeneration = self._generation
 	self._manager:Start()
-	if self._ESP then self._ESP:Start() end
-	self:_runGameScriptIfNeeded()
 end
 
 function LimbExtender:_doCosmeticUpdateBatched()
@@ -712,52 +606,11 @@ function LimbExtender:_doCosmeticUpdateBatched()
 	end
 end
 
-function LimbExtender:_runGameScriptIfNeeded()
-	local currentId = game.GameId
-	local urlList = GAME_SCRIPT_URLS[currentId]
-	if not urlList then return end
-
-	if self._customSetup then
-		task_spawn(function()
-			local success, result = pcall(self._customSetup)
-			if not success then
-				warn("[LimbExtender] Custom setup error: " .. tostring(result))
-			end
-		end)
-		return
-	end
-
-	if self._gameScriptFetched then return end
-	self._gameScriptFetched = true
-
-	task_spawn(function()
-		local source = fetchWithFallback(urlList)
-		if not source then
-			warn("[LimbExtender] Failed to fetch game script from all URLs for game ID " .. currentId)
-			return
-		end
-		local fn, err = loadstring(source)
-		if not fn then
-			warn("[LimbExtender] Custom script compile error: " .. tostring(err))
-			return
-		end
-		local success, result = pcall(fn, self)
-		if not success then
-			warn("[LimbExtender] Custom script runtime error: " .. tostring(result))
-		end
-
-		if not self._customSetup then
-			warn("[LimbExtender] Custom script did not set _customSetup; it will not re-run on restarts.")
-		end
-	end)
-end
-
 function LimbExtender.new(userSettings)
 	local self = setmetatable({
 		_settings            = mergeSettings(userSettings),
 		_playerCache         = limbData.playerCache,
 		_manager             = nil,
-		_ESP                 = nil,
 		_running             = false,
 		_destroyed           = false,
 		_npcIdMap            = {},
@@ -766,14 +619,11 @@ function LimbExtender.new(userSettings)
 		_workRunning         = false,
 		_dirtyRestart        = false,
 		_dirtyCosmetic       = false,
-		_dirtyESP            = false,
 		_suppressOnLimbLost  = false,
 		_workScheduled       = false,
 		_restartLock 		 = false,
 		_generation 		 = 0,
 		_managerGeneration 	 = 0,
-		_gameScriptFetched   = false,
-		_customSetup         = nil,
 	}, LimbExtender)
 
 	limbData.targetLimbName = self._settings.TARGET_LIMB
@@ -799,58 +649,16 @@ function LimbExtender.new(userSettings)
 		end,
 	})
 
-	if self._settings.ESP then
-		local espModule = ensureESPLoaded()
-		if espModule then
-			self._ESP = espModule.new(self:_buildESPConfig())
-		else
-			self._settings.ESP = false
-		end
-	end
-
 	limbData.terminate = function() self:Destroy() end
 	return self
-end
-
-function LimbExtender:_buildESPConfig()
-	local s = self._settings
-	return {
-		Color                = s.ESP_COLOR,
-		Box3DColor           = s.ESP_BOX3D_COLOR,
-		HealthColor          = s.ESP_HEALTH_COLOR,
-		EmptyColor           = s.ESP_EMPTY_COLOR,
-		SkeletonColor        = s.ESP_SKELETON_COLOR,
-		TextColor            = s.ESP_TEXT_COLOR,
-		TextSize             = s.ESP_TEXT_SIZE,
-		UseOffscreenPoint    = s.ESP_OFFSCREEN_POINT,
-		FilterLocalCharacter = s.ESP_FILTER_LOCAL,
-		LOD = {
-			MaxDistance        = s.ESP_MAX_DISTANCE,
-			NearDistance       = s.ESP_NEAR_DISTANCE,
-			MediumDistance     = s.ESP_MEDIUM_DISTANCE,
-			OcclusionEnabled   = s.ESP_OCCLUSION,
-			OcclusionFrequency = s.ESP_OCCLUSION_FREQUENCY,
-		},
-		Flags = {
-			Near   = applyToggles(s, s.ESP_NEAR_FLAGS),
-			Medium = applyToggles(s, s.ESP_MEDIUM_FLAGS),
-			Far    = applyToggles(s, s.ESP_FAR_FLAGS),
-		},
-		TextResolver = s.ESP_TEXT_RESOLVER,
-		CanDraw      = s.ESP_CAN_DRAW,
-		TracerOrigin = s.ESP_TRACER_ORIGIN,
-	}
 end
 
 function LimbExtender:Start()
 	if self._destroyed or self._running then return end
 	self._running = true
 	self._manager:Start()
-	if self._ESP then self._ESP:Start() end
 
-	self:_runGameScriptIfNeeded()
-
-	if self._dirtyRestart or self._dirtyCosmetic or self._dirtyESP then
+	if self._dirtyRestart or self._dirtyCosmetic then
 		self._workScheduled = true
 		task_spawn(function() self:_processDirtyWork() end)
 	end
@@ -866,7 +674,6 @@ function LimbExtender:Stop()
 		sharedRestoreLimb(self, cacheKey, entry.Limb)
 	end
 	table_clear(self._playerCache)
-	if self._ESP then self._ESP:Stop() end
 end
 
 function LimbExtender:Toggle(state)
@@ -886,17 +693,8 @@ end
 function LimbExtender:Set(key, value)
 	local s = self._settings
 
-	if key == "ESP_NEAR_FLAGS" or key == "ESP_MEDIUM_FLAGS" or key == "ESP_FAR_FLAGS" then
-		if type(s[key]) ~= "table" then s[key] = {} end
-		if type(value) == "table" then
-			for k, v in pairs(value) do s[key][k] = v end
-		else
-			s[key] = value
-		end
-	else
-		if s[key] == value then return end
-		s[key] = value
-	end
+	if s[key] == value then return end
+	s[key] = value
 
 	if key == "GET_PLAYER_FROM_CHARACTER" or key == "CUSTOM_CHARACTER_SYSTEM" then
 		if self._manager then
@@ -910,10 +708,6 @@ function LimbExtender:Set(key, value)
 		self._dirtyRestart = true
 	else
 		self._dirtyCosmetic = true
-	end
-
-	if key == "ESP" or (type(key) == "string" and key:sub(1,4) == "ESP_") then
-		self._dirtyESP = true
 	end
 
 	if self._running and not self._workScheduled then
@@ -944,7 +738,6 @@ end
 function LimbExtender:Destroy()
 	self:Stop()
 	self._destroyed = true
-	if self._ESP then self._ESP:Destroy(); self._ESP = nil end
 	limbData.terminate = nil
 end
 
