@@ -87,7 +87,7 @@ local BLOCKED_PROPS = {
 local firingProps = setmetatable({}, { __mode = "k" })
 
 local MANAGER_SOURCE_URLS = {
-	"https://api.rubis.app/v2/scrap/rNPKyva99IGbf6tH/raw"
+	"https://raw.githubusercontent.com/NoirStillHere/NoirHub-The-New-Beginning/refs/heads/main/Module/Assist/Limbs/manager_src_urls"
 }
 
 local function fetchWithFallback(urlList)
